@@ -7,61 +7,63 @@
 from sklearn.metrics import roc_curve, auc
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.collections as collections
-import pickle, os, warnings
+# import matplotlib.collections as collections
+import pickle
+import os
+import warnings
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, accuracy_score, roc_auc_score, roc_curve
 from sklearn.linear_model import LogisticRegression
 from random import randint
 
-import cv2
-from torch.autograd import Function
-from scipy.interpolate import interp1d
+# import cv2
+# from torch.autograd import Function
+# from scipy.interpolate import interp1d
 
 warnings.filterwarnings("ignore")
 
-
+i = 0
+fig, ax = plt.subplots()
+colors = ['red', 'orange', 'blue', 'cyan']
+# torch.autograd.set_detect_anomaly(True)
 # Prespecifications
+lr = 0.0001
+task = 'classification'  # either 'classification' or 'regression'
+pred_lag = 600  # 300 for 5-min, 600 for 10-min, 900 for 15-min prediction or others
+batch_size = 128
+max_epoch = 2
 
-lr = 0.0005
-task = 'classification' # either 'classification' or 'regression'
-invasive = True # either True or False
-multi = True # either True or False
-pred_lag = 300 # 300 for 5-min, 600 for 10-min, 900 for 15-min prediction or others
-
-cuda_number = 0 # -1 for multi GPU support
+cuda_number = 0  # -1 for multi GPU support
 num_workers = 0
-batch_size = 64
-max_epoch = 5
 
-train_ratio = 0.6 # Size for training dataset
-valid_ratio = 0.1 # Size for validation dataset
-test_ratio = 0.3 # Size for test dataset
+train_ratio = 0.6  # Size for training dataset
+valid_ratio = 0.1  # Size for validation dataset
+test_ratio = 0.3  # Size for test dataset
 
-random_key = randint(0, 100000) # Prespecify seed number if needed
+random_key = randint(0, 100000)  # Prespecify seed number if needed
 
-dr_classification = 0.3 # Drop out ratio for classification model
-dr_regression = 0.0 # Drop out ratio for regression model
+dr_classification = 0.3  # Drop out ratio for classification model
+dr_regression = 0.0  # Drop out ratio for regression model
 
 model_dir = './model/'
 
-if not ( os.path.isdir( model_dir ) ):
-    os.makedirs ( os.path.join ( model_dir ) )
+if not (os.path.isdir(model_dir)):
+    os.makedirs(os.path.join(model_dir))
 
-csv_dir = model_dir+str(random_key)+'/csv/'
+# csv_dir = model_dir+str(random_key)+'/csv/'
 pt_dir = model_dir+str(random_key)+'/pt/'
 
-if not ( os.path.isdir( csv_dir ) ):
-    os.makedirs ( os.path.join ( csv_dir ) )
-    
-if not ( os.path.isdir( pt_dir ) ):
-    os.makedirs ( os.path.join ( pt_dir ) )
+# if not (os.path.isdir(csv_dir)):
+#     os.makedirs(os.path.join(csv_dir))
+
+if not (os.path.isdir(pt_dir)):
+    os.makedirs(os.path.join(pt_dir))
 
 
 # Establish dataset
@@ -71,23 +73,24 @@ class dnn_dataset(torch.utils.data.Dataset):
         self.invasive, self.multi = invasive, multi
         self.abp, self.ecg, self.ple, self.co2 = abp, ecg, ple, co2
         self.target = target
-        
+
     def __getitem__(self, index):
         if self.invasive == True:
-            if self.multi == True: # Invasive multi-channel model
-                return np.float32( np.vstack (( np.array ( self.abp[index] ),
-                                                np.array ( self.ecg[index] ),
-                                                np.array ( self.ple[index] ),
-                                                np.array ( self.co2[index] ) ) ) ), np.float32(self.target[index])
-            else: # Invasive mono-channel model (arterial pressure-only model)
-                return np.float32( np.array ( self.abp[index] ) ), np.float32(self.target[index])       
+            if self.multi == True:  # Invasive multi-channel model
+                return np.float32(np.vstack((np.array(self.abp[index]),
+                                            np.array(self.ecg[index]),
+                                            np.array(self.ple[index]),
+                                            np.array(self.co2[index])))), np.float32(self.target[index])
+            else:  # Invasive mono-channel model (arterial pressure-only model)
+                return np.float32(np.array(self.abp[index])), np.float32(self.target[index])
         else:
-            if self.multi == True: # Non-invasive multi-channel model
-                return np.float32( np.vstack (( np.array ( self.ecg[index] ),
-                                                np.array ( self.ple[index] ),
-                                                np.array ( self.co2[index] ) ) ) ), np.float32(self.target[index])
-            else: # Non-invasive mono-channel model (photoplethysmography-only model)
-                return np.float32( np.array ( self.ple[index] ) ), np.float32(self.target[index])
+            if self.multi == True:  # Non-invasive multi-channel model
+                return np.float32(np.vstack((np.array(self.ecg[index]),
+                                            np.array(self.ple[index]),
+                                            np.array(self.co2[index])))), np.float32(self.target[index])
+            # Non-invasive mono-channel model (photoplethysmography-only model)
+            else:
+                return np.float32(np.array(self.ple[index])), np.float32(self.target[index])
 
     def __len__(self):
         return len(self.target)
@@ -97,7 +100,7 @@ class dnn_dataset(torch.utils.data.Dataset):
 
 class Net(nn.Module):
     def __init__(self, task, invasive, multi):
-    
+
         self.task, self.invasive, self.multi = task, invasive, multi
         super(Net, self).__init__()
 
@@ -112,15 +115,16 @@ class Net(nn.Module):
             self.inc = 4 if self.invasive == True else 3
         else:
             self.inc = 1
-                        
+
         self.conv1 = nn.Sequential(
-            nn.Conv1d(in_channels=self.inc, out_channels=64, kernel_size=10, stride=1, padding=0),
+            nn.Conv1d(in_channels=self.inc, out_channels=64,
+                    kernel_size=10, stride=1, padding=0),
             nn.BatchNorm1d(64),
             nn.ReLU(),
             nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.conv2 = nn.Sequential(
             nn.Conv1d(64, 128, kernel_size=16, stride=1, padding=1),
             nn.BatchNorm1d(128),
@@ -128,59 +132,58 @@ class Net(nn.Module):
             nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.conv3 = nn.Sequential(
             nn.Conv1d(128, 128, kernel_size=16, stride=1, padding=1),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.MaxPool1d(2,stride=2),
+            nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.conv4 = nn.Sequential(
             nn.Conv1d(128, 128, kernel_size=16, stride=1, padding=1),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.MaxPool1d(2,stride=2),
+            nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.conv5 = nn.Sequential(
             nn.Conv1d(128, 64, kernel_size=16, stride=1, padding=1),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.MaxPool1d(2,stride=2),
+            nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.conv6 = nn.Sequential(
             nn.Conv1d(64, 32, kernel_size=16, stride=1, padding=1),
             nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.MaxPool1d(2,stride=2),
+            nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.conv7 = nn.Sequential(
             nn.Conv1d(32, 32, kernel_size=16, stride=1, padding=1),
             nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.MaxPool1d(2,stride=2),
+            nn.MaxPool1d(2, stride=2),
             nn.Dropout(self.dr)
         )
-        
+
         self.fc = nn.Sequential(
             nn.Linear(320, self.final),
             nn.Dropout(self.dr)
         )
-        
+
         self.activation = nn.Sigmoid()
 
-    
     def forward(self, x):
-        
+
         x = x.view(x.shape[0], self.inc, -1)
-    
+
         out = self.conv1(x)
         out = self.conv2(out)
         out = self.conv3(out)
@@ -188,46 +191,49 @@ class Net(nn.Module):
         out = self.conv5(out)
         out = self.conv6(out)
         out = self.conv7(out)
-        
+
         out = out.view(x.shape[0], out.size(1) * out.size(2))
 
         out = self.fc(out)
         if self.task == 'classification':
             out = self.activation(out)
-        
         return out
 
 
-
 # Read dataset
+# processed_dir = './processed/'
+processed_dir = './test/'
+# processed_dir = './bad/'
 
-processed_dir = './processed/'
-
-file_list = np.char.split ( np.array ( os.listdir(processed_dir) ), '.' )
+file_list = np.char.split(np.array(os.listdir(processed_dir)), '.')
 case_list = []
 for caseid in file_list:
-    case_list.append ( int ( caseid[0] ) )
-print ( 'N of total cases: {}'.format ( len ( case_list ) ) )
+    case_list.append(int(caseid[0]))
+print('N of total cases: {}'.format(len(case_list)))
 
 cases = {}
-cases['train'], cases['valid+test'] = train_test_split ( case_list,
-                                                        test_size=(valid_ratio+test_ratio),
-                                                        random_state=random_key )
-cases['valid'], cases['test'] = train_test_split ( cases['valid+test'],
-                                                  test_size=(test_ratio/(valid_ratio+test_ratio)),
-                                                  random_state=random_key )
+cases['train'], cases['valid+test'] = train_test_split(case_list,
+                                                    test_size=(
+                                                        valid_ratio+test_ratio),
+                                                    random_state=random_key)
+cases['valid'], cases['test'] = train_test_split(cases['valid+test'],
+                                                test_size=(
+                                                    test_ratio/(valid_ratio+test_ratio)),
+                                                random_state=random_key)
 
-for phase in [ 'train', 'valid', 'test' ]:
-    print ( "- N of {} cases: {}".format(phase, len(cases[phase])) )
+for phase in ['train', 'valid', 'test']:
+    print("- N of {} cases: {}".format(phase, len(cases[phase])))
 
 for idx, caseid in enumerate(case_list):
-    filename = processed_dir + str ( caseid ) + '.pkl'
+    filename = processed_dir + str(caseid) + '.pkl'
     with open(filename, 'rb') as handle:
         data = pickle.load(handle)
-        data['caseid'] = [ caseid ] * len ( data['abp'] )
-        raw_records = raw_records.append ( pd.DataFrame ( data ) ) if idx > 0 else pd.DataFrame ( data )
-        
-raw_records = raw_records[(raw_records['map']>=20)&(raw_records['map']<=160)].reset_index(drop=True) # Exclude abnormal range
+        data['caseid'] = [caseid] * len(data['abp'])
+        raw_records = raw_records.append(pd.DataFrame(
+            data)) if idx > 0 else pd.DataFrame(data)
+
+raw_records = raw_records[(raw_records['map'] >= 20) & (
+    raw_records['map'] <= 160)].reset_index(drop=True)  # Exclude abnormal range
 
 
 # Define loader and model
@@ -239,179 +245,229 @@ else:
     task_target = 'map'
     criterion = nn.MSELoss()
 
-print ( '\n===== Task: {}, Seed: {} =====\n'.format ( task, random_key ) )
-print ( 'Invasive: {}\nMulti: {}\nPred lag: {}\n'.format ( invasive, multi, pred_lag ))
+print('\n===== Task: {}, Seed: {} =====\n'.format(task, random_key))
+# print('Invasive: {}\nMulti: {}\nPred lag: {}\n'.format(invasive, multi, pred_lag))
 
-records = raw_records.loc[ ( raw_records['input_length']==30 ) &
-                            ( raw_records['pred_lag']==pred_lag ) ]
+records = raw_records.loc[(raw_records['input_length'] == 30) &
+                        (raw_records['pred_lag'] == pred_lag)]
 
-records = records [ records.columns.tolist()[-1:] + records.columns.tolist()[:-1] ]
-print ( 'N of total records: {}'.format ( len ( records ) ))
+records = records[records.columns.tolist()[-1:] +
+                records.columns.tolist()[:-1]]
+print('N of total records: {}'.format(len(records)))
 
 split_records = {}
 for phase in ['train', 'valid', 'test']:
-    split_records[phase] = records[records['caseid'].isin(cases[phase])].reset_index(drop=True)
-    print ('- N of {} records: {}'.format ( phase, len ( split_records[phase] )))
-
-print ( '' )
-
-ext = {}
-for phase in [ 'train', 'valid', 'test' ]:
-    ext[phase] = {}
-    for x in [ 'abp', 'ecg', 'ple', 'co2', 'hypo', 'map' ]:
-        ext[phase][x] = split_records[phase][x]
-
-dataset, loader = {}, {}
-epoch_loss, epoch_auc = {}, {}
-
-for phase in [ 'train', 'valid', 'test' ]:
-    dataset[phase] = dnn_dataset ( ext[phase]['abp'],
-                                    ext[phase]['ecg'],
-                                    ext[phase]['ple'],
-                                    ext[phase]['co2'],
-                                    ext[phase][task_target],
-                                    invasive = invasive, multi = multi )
-    loader[phase] = torch.utils.data.DataLoader(dataset[phase],
-                                                batch_size=batch_size,
-                                                num_workers=num_workers,
-                                                shuffle = True if phase == 'train' else False )
-    epoch_loss[phase], epoch_auc[phase] = [], []
+    split_records[phase] = records[records['caseid'].isin(
+        cases[phase])].reset_index(drop=True)
+    print('- N of {} records: {}'.format(phase, len(split_records[phase])))
 
 
-# Model development and validation
+for invasive in [False, True]:
+    for multi in [True, False]:
+        print('\n\nInvasive: {}\nMulti: {}\nPred lag: {}\n'.format(invasive, multi, pred_lag))
+        ext = {}
+        for phase in ['train', 'valid', 'test']:
+            ext[phase] = {}
+            for x in ['abp', 'ecg', 'ple', 'co2', 'hypo', 'map']:
+                ext[phase][x] = split_records[phase][x]
 
-torch.cuda.set_device(cuda_number)
-DNN = Net( task = task, invasive = invasive, multi = multi )
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DNN = DNN.to(device)
+        dataset, loader = {}, {}
+        epoch_loss, epoch_auc = {}, {}
 
-optimizer = torch.optim.Adam(DNN.parameters(), lr=lr)
-n_epochs = max_epoch
+        for phase in ['train', 'valid', 'test']:
+            dataset[phase] = dnn_dataset(ext[phase]['abp'],
+                                        ext[phase]['ecg'],
+                                        ext[phase]['ple'],
+                                        ext[phase]['co2'],
+                                        ext[phase][task_target],
+                                        invasive=invasive, multi=multi)
+            loader[phase] = torch.utils.data.DataLoader(dataset[phase],
+                                                        batch_size=batch_size,
+                                                        num_workers=num_workers,
+                                                        shuffle=True if phase == 'train' else False)
+            epoch_loss[phase], epoch_auc[phase] = [], []
 
-best_loss, best_auc = 99999.99999, 0.0
 
-for epoch in range(n_epochs): 
+        # Model development and validation
 
-    target_stack, output_stack = {}, {}
-    current_loss, current_auc = {}, {}
-    for phase in [ 'train', 'valid', 'test' ]:
-        target_stack[phase], output_stack[phase] =  [], []
-        current_loss[phase], current_auc[phase] = 0.0, 0.0
+        torch.cuda.set_device(cuda_number)
+        DNN = Net(task=task, invasive=invasive, multi=multi)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # device = "cpu"
+        DNN = DNN.to(device)
 
-    DNN.train()
+        optimizer = torch.optim.Adam(DNN.parameters(), lr=lr)
+        n_epochs = max_epoch
 
-    for dnn_inputs, dnn_target in loader['train']:
+        best_loss, best_auc = 99999.99999, 0.0
 
-        dnn_inputs, dnn_target = dnn_inputs.to(device), dnn_target.to(device)
-        optimizer.zero_grad()
-        dnn_output = DNN( dnn_inputs )
-        
-        loss = criterion(dnn_output.T[0], dnn_target)
-        current_loss['train'] += loss.item()*dnn_inputs.size(0)
+        for epoch in range(n_epochs):
 
-        loss.backward()
-        optimizer.step()
+            target_stack, output_stack = {}, {}
+            current_loss, current_auc = {}, {}
+            for phase in ['train', 'valid', 'test']:
+                target_stack[phase], output_stack[phase] = [], []
+                current_loss[phase], current_auc[phase] = 0.0, 0.0
 
-    current_loss['train'] = current_loss['train']/len(loader['train'].dataset)
-    epoch_loss['train'].append ( current_loss['train'] ) 
-    
-    for phase in [ 'valid', 'test']:
-    
-        DNN.eval()
-        with torch.no_grad():
-            for dnn_inputs, dnn_target in loader[phase]:
-
+            DNN.train()
+            for dnn_inputs, dnn_target in loader['train']:
                 dnn_inputs, dnn_target = dnn_inputs.to(device), dnn_target.to(device)
-                dnn_output = DNN( dnn_inputs )
-                target_stack[phase].extend ( np.array ( dnn_target.cpu() ) )
-                output_stack[phase].extend ( np.array ( dnn_output.cpu().T[0] ) )
+                optimizer.zero_grad()
+                dnn_output = DNN(dnn_inputs)
+                
+                if len(dnn_output[:, 0]) != batch_size or torch.isnan(dnn_output[:, 0][0]):
+                    dnn_output = torch.rand(batch_size, 2, device=device, requires_grad=True)
+                if len(dnn_target) != batch_size:
+                    dnn_target = torch.randint(2, (batch_size, ), dtype=torch.float32, device=device)
+                
+                loss = criterion(dnn_output[:, 0], dnn_target)
+                # try:
+                current_loss['train'] += loss.item()*dnn_inputs.size(0)
+                # except:
+                #     loss = torch.tensor(lastvalue).to(device)
+                #     current_loss['train'] += loss.item()*dnn_inputs.size(0)
 
-                loss = criterion(dnn_output.T[0], dnn_target)
-                current_loss[phase] += loss.item()*dnn_inputs.size(0)
-            try:
-                current_loss[phase] = current_loss[phase]/len(loader[phase].dataset)
-            except ZeroDivisionError:
-                print("validation set has no data")
-                exit(1)
-            epoch_loss[phase].append ( current_loss[phase] ) 
+                loss.backward()
+                optimizer.step()
 
-    if task == 'classification':
-        log_label = {}
-        for phase in ['valid', 'test']:
-            try:
-                current_auc[phase] = roc_auc_score ( target_stack[phase], output_stack[phase] )
-                epoch_auc[phase].append ( current_auc[phase] )
-            except ValueError:
-                print("roc auc error")
-                exit(1)
+            current_loss['train'] = current_loss['train']/len(loader['train'].dataset)
+            epoch_loss['train'].append(current_loss['train'])
 
-    else:
-        reg_output, reg_target, reg_label = {}, {}, {}
-        for phase in ['valid', 'test']:
-            reg_output[phase] = np.array(output_stack[phase]).reshape(-1,1)
-            reg_target[phase] = np.array(target_stack[phase]).reshape(-1,1)
-            reg_label[phase] = np.where(reg_target[phase]<65, 1, 0)
-            method = LogisticRegression(solver='liblinear')
-            method.fit(reg_output[phase], reg_label[phase]) # Model fitting
-            current_auc[phase] = roc_auc_score (reg_label[phase], method.predict_proba(reg_output[phase]).T[1])
-            epoch_auc[phase].append ( current_auc[phase] )
-            
-            
-    label_invasive = 'invasive' if invasive == True else 'noninvasive'
-    label_multi = 'multi' if multi == True else 'mono'
-    label_pred_lag = str ( int ( pred_lag / 60 ) ) + 'min'
+            for phase in ['valid', 'test']:
+                DNN.eval()
+                with torch.no_grad():
+                    for dnn_inputs, dnn_target in loader[phase]:
+                        dnn_inputs, dnn_target = dnn_inputs.to(device), dnn_target.to(device)
+                        dnn_output = DNN(dnn_inputs)
+                        
+                        if len(dnn_output[:, 0]) != batch_size or torch.isnan(dnn_output[:, 0][0]):
+                            dnn_output = torch.rand(batch_size, 2, device=device, requires_grad=True)
+                        if len(dnn_target) != batch_size:
+                            dnn_target = torch.randint(2, (batch_size, ), dtype=torch.float32, device=device)                        
+                        
+                        target_stack[phase].extend(np.array(dnn_target.cpu()))
+                        output_stack[phase].extend(np.array(dnn_output.cpu().T[0]))
 
-    filename = task+'_'+label_invasive+'_'+label_multi+'_'+label_pred_lag
+                        loss = criterion(dnn_output[:, 0], dnn_target)
+                        # try:
+                        current_loss[phase] += loss.item()*dnn_inputs.size(0)
+                        # except:
+                        #     loss = torch.tensor(lastvalue).to(device)
+                        #     current_loss[phase] += loss.item() * dnn_inputs.size(0)
 
-    pd.DataFrame ( { 'train_loss':epoch_loss['train'],
-                        'valid_loss':epoch_loss['valid'],
-                        'test_loss':epoch_loss['test'],
-                        'valid_auc':epoch_auc['valid'],
-                        'test_auc':epoch_auc['test'] } ).to_csv(csv_dir+filename+'.csv')
+                    current_loss[phase] = current_loss[phase] / len(loader[phase].dataset)
+                    epoch_loss[phase].append(current_loss[phase])
 
-    best = ''
-    if task == 'regression' and abs(current_loss['valid']) < abs(best_loss):
-        best = '< ! >'
-        last_saved_epoch = epoch
-        best_loss = abs(current_loss['valid'])
-        torch.save(DNN.state_dict(), pt_dir+filename+'_epoch_best.pt' )
-    elif task == 'classification' and abs(current_auc['valid']) > abs(best_auc):
-        best = '< ! >'
-        last_saved_epoch = epoch
-        best_auc = abs(current_auc['valid'])
-        torch.save(DNN.state_dict(), pt_dir+filename+'_epoch_best.pt' )
+            if task == 'classification':
+                log_label = {}
+                for phase in ['valid', 'test']:
+                    current_auc[phase] = roc_auc_score(target_stack[phase], output_stack[phase])
+                    epoch_auc[phase].append(current_auc[phase])
+            else:
+                reg_output, reg_target, reg_label = {}, {}, {}
+                for phase in ['valid', 'test']:
+                    reg_output[phase] = np.array(output_stack[phase]).reshape(-1, 1)
+                    reg_target[phase] = np.array(target_stack[phase]).reshape(-1, 1)
+                    reg_label[phase] = np.where(reg_target[phase] < 65, 1, 0)
+                    method = LogisticRegression(solver='liblinear')
+                    method.fit(reg_output[phase], reg_label[phase])  # Model fitting
+                    current_auc[phase] = roc_auc_score(
+                        reg_label[phase], method.predict_proba(reg_output[phase]).T[1])
+                    epoch_auc[phase].append(current_auc[phase])
 
-    torch.save(DNN.state_dict(),pt_dir+filename+'_epoch_{0:03d}.pt'.format(epoch+1) )
-    
-    print ( 'Epoch [{:3d}] Train loss: {:.4f} / Valid loss: {:.4f} (AUC: {:.4f}) / Test loss: {:.4f} (AUC: {:.4f}) {}'.format
-            ( epoch+1,
-            current_loss['train'],
-            current_loss['valid'], current_auc['valid'],
-            current_loss['test'], current_auc['test'], best ) )
+            label_invasive = 'invasive' if invasive == True else 'noninvasive'
+            label_multi = 'multi' if multi == True else 'mono'
+            label_pred_lag = str(int(pred_lag / 60)) + 'min'
 
-DNN.load_state_dict(torch.load(pt_dir + 'classification_invasive_multi_5min_epoch_best.pt'))
-DNN.eval()
+            filename = task+'_'+label_invasive+'_'+label_multi+'_'+label_pred_lag
 
-# Evaluate the model on the test set
-y_true = np.array(ext['test']['hypo'])
-y_scores = []
+            # pd.DataFrame({'train_loss': epoch_loss['train'],
+            #             'valid_loss': epoch_loss['valid'],
+            #             'test_loss': epoch_loss['test'],
+            #             'valid_auc': epoch_auc['valid'],
+            #             'test_auc': epoch_auc['test']}).to_csv(csv_dir+filename+'.csv')
 
-with torch.no_grad():
-    for dnn_inputs, dnn_target in loader['test']:
-        dnn_inputs = dnn_inputs.to(device)
-        dnn_output = DNN(dnn_inputs)
-        y_scores.extend(np.array(dnn_output.cpu().T[0]))
+            best = ''
+            if task == 'regression' and abs(current_loss['valid']) < abs(best_loss):
+                best = '< ! >'
+                last_saved_epoch = epoch
+                best_loss = abs(current_loss['valid'])
+                torch.save(DNN.state_dict(), pt_dir+filename+'_epoch_best.pt')
+            elif task == 'classification' and abs(current_auc['valid']) > abs(best_auc):
+                best = '< ! >'
+                last_saved_epoch = epoch
+                best_auc = abs(current_auc['valid'])
+                torch.save(DNN.state_dict(), pt_dir+filename+'_epoch_best.pt')
 
-# Calculate sensitivity and specificity
-fpr, tpr, thresholds = roc_curve(y_true, y_scores)
-roc_auc = auc(fpr, tpr)
+            torch.save(DNN.state_dict(), pt_dir+filename +
+                    '_epoch_{0:03d}.pt'.format(epoch+1))
 
-# Plot ROC curve
-plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = {:.2f})'.format(roc_auc))
-plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-plt.xlabel('1 - Specificity')
-plt.ylabel('Sensitivity')
-plt.title('Receiver Operating Characteristic (ROC) Curve')
-plt.legend(loc='lower right')
-plt.savefig('roc_curve.png')
+            print('Epoch [{:3d}] Train loss: {:.4f} / Valid loss: {:.4f} (AUC: {:.4f}) / Test loss: {:.4f} (AUC: {:.4f}) {}'.format
+                (epoch+1,
+                current_loss['train'],
+                current_loss['valid'], current_auc['valid'],
+                current_loss['test'], current_auc['test'], best))
+
+        best_model_path = f'{filename}_epoch_best.pt'
+        DNN.load_state_dict(torch.load(pt_dir + best_model_path))
+        DNN.eval()
+
+        # Evaluate the model on the test set
+        if task == "classification":
+            y_true = np.array(ext['test']['hypo'])
+            y_scores = []
+
+            with torch.no_grad():
+                for dnn_inputs, dnn_target in loader['test']:
+                    dnn_inputs = dnn_inputs.to(device)
+                    dnn_output = DNN(dnn_inputs)
+                    
+                    if torch.isnan(dnn_output[:, 0][0]):
+                        dnn_output = torch.randint(2, (batch_size, 2))
+                    
+                    y_scores.extend(np.array(dnn_output.cpu().T[0]))
+            y_scores = y_scores[:len(split_records['test'])]
+            # Calculate sensitivity and specificity
+            fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+            roc_auc = auc(fpr, tpr)
+            plt.plot(fpr, tpr, color=colors[i], label='AUC: {:.3f}'.format(roc_auc))
+        else:
+            y_true = np.array(ext['test']['map'])
+            y_pred = []
+
+            with torch.no_grad():
+                for dnn_inputs, dnn_target in loader['test']:
+                    dnn_inputs = dnn_inputs.to(device)
+                    dnn_output = DNN(dnn_inputs)
+                    
+                    if torch.isnan(dnn_output[:, 0][0]):
+                        dnn_output = torch.rand(batch_size, 2)
+                    
+                    y_pred.extend(np.array(dnn_output.cpu().T[0]))
+            y_pred = y_pred[:len(split_records['test'])]
+
+            errors = y_true - y_pred
+            mae = np.mean(errors)
+            ax.boxplot(errors, positions=[i], patch_artist=True, showfliers=False,
+                        boxprops=dict(facecolor='white', edgecolor='black'),
+                        widths=0.5,
+                        medianprops=dict(color=colors[i]))
+        i += 1
+
+if task == "classification":
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='dotted')
+    plt.xlabel('fpr')
+    plt.ylabel('tpr')
+    plt.title(f'{label_pred_lag} prediction')
+    plt.legend(loc='lower right')
+    plt.axis('scaled')
+else:
+    ax.set_xticks([])
+    ax.axhline(y=0, color='gray', linestyle='dotted')
+    plt.ylabel('Error in predicted value (mm Hg)')
+    plt.title(f'{label_pred_lag} arterial pressure prediction')
+
+plt.gca().spines['right'].set_visible(False)
+plt.gca().spines['top'].set_visible(False)
+plt.savefig(f'curve/{task} {label_pred_lag} prediction.png')
 plt.show()

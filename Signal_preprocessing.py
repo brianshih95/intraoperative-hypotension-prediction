@@ -13,11 +13,8 @@ import pandas as pd
 import requests
 from scipy.signal import find_peaks
 
-
 # Prespecifications
-# 5, 41 can't use
-ids = [881, 112, 114, 116, 117, 118, 119, 124, 125, 126, 128, 130, 132, 135, 136, 138, 139, 140, 142, 143, 145, 148, 149, 150, 152, 156, 157, 158, 161, 163, 164, 166, 167, 172, 175, 177, 178, 180, 183, 184, 185, 186, 189, 190, 191, 195, 197, 198, 199, 200
-       ]
+ids = []
 sampling_rate = 100 # Resampling (Hz)
 input_length = [ 30 ] # Input data length (sec)
 pred_lag = [ 300, 600, 900 ] # Prediction lag for 300, 600, and 900 sec (5-, 10-, 15-min prediction) 
@@ -31,13 +28,11 @@ processed_dir = './processed/' # Output path
 if not (os.path.isdir(processed_dir)):
     os.makedirs(os.path.join(processed_dir))
 
-
 for caseid in ids:
     converted_path = convert_dir+str(caseid)+'.pkl'
     processed_path = processed_dir+'{}.pkl'.format(caseid)
     source = {}
     source_end = 0
-
 
     # Read time-synchronized raw data
 
